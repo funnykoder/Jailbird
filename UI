@@ -1,10 +1,13 @@
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
 local Window = Library.CreateLib("Jailbird UI", "DarkTheme")
 
-local Players = game:FindService("Players")
-local CoreGui = game:FindService("CoreGui")
-local RunService = game:FindService("RunService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
 local lp = Players.LocalPlayer
+local Mouse = lp:GetMouse()
 
 -- Chams Setup
 local Storage = Instance.new("Folder")
@@ -12,69 +15,109 @@ Storage.Parent = CoreGui
 Storage.Name = "Highlight_Storage"
 local connections = {}
 local chamsEnabled = false
-local heartbeatEnabled = false
 
 local function Highlight(plr)
     if plr == lp or (plr.Team and lp.Team and plr.Team == lp.Team) then return end
-    local Highlight = Instance.new("Highlight")
-    Highlight.Name = plr.Name
-    Highlight.FillColor = Color3.fromRGB(175, 25, 255)
-    Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    Highlight.FillTransparency = 0.5
-    Highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    Highlight.OutlineTransparency = 0
-    Highlight.Parent = Storage
+    local highlight = Storage:FindFirstChild(plr.Name) or Instance.new("Highlight")
+    highlight.Name = plr.Name
+    highlight.FillColor = Color3.fromRGB(175, 25, 255)
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.OutlineTransparency = 0
+    highlight.Parent = Storage
     local plrchar = plr.Character
-    if plrchar then Highlight.Adornee = plrchar end
-    connections[plr] = plr.CharacterAdded:Connect(function(char)
-        Highlight.Adornee = chamsEnabled and char or nil
+    if plrchar then highlight.Adornee = plrchar end
+    connections[plr] = connections[plr] or plr.CharacterAdded:Connect(function(char)
+        if chamsEnabled then highlight.Adornee = char end
     end)
 end
 
 local function ToggleChams(state)
     chamsEnabled = state
-    for _, plr in next, Players:GetPlayers() do
-        if plr ~= lp and (not plr.Team or not lp.Team or plr.Team ~= lp.Team) then
-            local highlight = Storage:FindFirstChild(plr.Name)
-            if highlight then
-                highlight.Adornee = state and plr.Character or nil
-            elseif state then
-                Highlight(plr)
-            end
+    Storage:ClearAllChildren()
+    for _, conn in pairs(connections) do
+        conn:Disconnect()
+    end
+    table.clear(connections)
+    if state then
+        for _, plr in next, Players:GetPlayers() do
+            Highlight(plr)
         end
     end
 end
-
-RunService.Heartbeat:Connect(function()
-    if chamsEnabled and heartbeatEnabled then
-        local pulse = math.sin(tick() * 2) * 0.2 + 0.5
-        for _, highlight in next, Storage:GetChildren() do
-            highlight.FillTransparency = pulse
-        end
-    end
-end)
 
 Players.PlayerAdded:Connect(function(plr)
     if chamsEnabled then Highlight(plr) end
 end)
-for _, v in next, Players:GetPlayers() do
-    if chamsEnabled then Highlight(v) end
-end
 Players.PlayerRemoving:Connect(function(plr)
-    if Storage[plr.Name] then Storage[plr.Name]:Destroy() end
+    if Storage:FindFirstChild(plr.Name) then Storage[plr.Name]:Destroy() end
     if connections[plr] then connections[plr]:Disconnect() end
 end)
 
 -- Aimbot Setup
-local aimbotLoaded = false
-local aimbotScript = loadstring(game:HttpGet("https://raw.githubusercontent.com/ttwizz/Open-Aimbot/master/source.lua", true))
-local function ToggleAimbot(state)
-    if not aimbotLoaded and state then
-        aimbotScript()
-        aimbotLoaded = true
-    end
-    getgenv().AimbotEnabled = state
+local aiming = false
+local target = nil
+local mouseSensitivity = UserInputService.MouseDeltaSensitivity
+local aimConfig = {
+    Enabled = false,
+    AimKey = Enum.KeyCode.E,
+    AimPart = "HumanoidRootPart",
+    Smoothing = 0.5, -- 0 to 1
+    Sensitivity = 2 -- 0 to 5
+}
+
+local function IsReady(tgt)
+    if not tgt or not tgt:FindFirstChildWhichIsA("Humanoid") or not tgt:FindFirstChild(aimConfig.AimPart) or not lp.Character or not lp.Character:FindFirstChildWhichIsA("Humanoid") then return false end
+    local plr = Players:GetPlayerFromCharacter(tgt)
+    if not plr or plr == lp or (plr.Team and lp.Team and plr.Team == lp.Team) then return false end
+    local humanoid = tgt:FindFirstChildWhichIsA("Humanoid")
+    if humanoid.Health == 0 then return false end
+    return true, tgt, tgt:FindFirstChild(aimConfig.AimPart).Position
 end
+
+RunService.Heartbeat:Connect(function()
+    if aiming and aimConfig.Enabled then
+        local closest = math.huge
+        target = nil
+        for _, plr in next, Players:GetPlayers() do
+            local isReady, char, partPos = IsReady(plr.Character)
+            if isReady then
+                local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(partPos)
+                if onScreen then
+                    local mag = (Vector2.new(Mouse.X, Mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                    if mag < closest then
+                        target = char
+                        closest = mag
+                    end
+                end
+            end
+        end
+        if target and IsReady(target) then
+            local _, _, partPos = IsReady(target)
+            UserInputService.MouseDeltaSensitivity = 0
+            local tween = TweenService:Create(workspace.CurrentCamera, TweenInfo.new(aimConfig.Smoothing, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, partPos) })
+            tween:Play()
+        else
+            UserInputService.MouseDeltaSensitivity = mouseSensitivity
+        end
+    else
+        aiming = false
+        target = nil
+        UserInputService.MouseDeltaSensitivity = mouseSensitivity
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input)
+    if not UserInputService:GetFocusedTextBox() and input.KeyCode == aimConfig.AimKey then
+        aiming = true
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == aimConfig.AimKey then
+        aiming = false
+    end
+end)
 
 -- UI Tabs
 local VisualsTab = Window:NewTab("Visuals")
@@ -82,11 +125,8 @@ local CombatTab = Window:NewTab("Combat")
 
 -- Visuals Section
 local VisualsSection = VisualsTab:NewSection("Chams Settings")
-VisualsSection:NewToggle("Enable Chams", "Toggles Chams visibility", function(state)
+VisualsSection:NewToggle("Enable Chams", "Toggles persistent Chams", function(state)
     ToggleChams(state)
-end)
-VisualsSection:NewToggle("Heartbeat Effect", "Toggles pulsing effect", function(state)
-    heartbeatEnabled = state
 end)
 VisualsSection:NewColorPicker("Fill Color", "Change Chams fill color", Color3.fromRGB(175, 25, 255), function(color)
     for _, highlight in next, Storage:GetChildren() do
@@ -99,10 +139,8 @@ VisualsSection:NewColorPicker("Outline Color", "Change Chams outline color", Col
     end
 end)
 VisualsSection:NewSlider("Fill Transparency", "Adjust fill transparency", 100, 0, 50, function(value)
-    if not heartbeatEnabled then
-        for _, highlight in next, Storage:GetChildren() do
-            highlight.FillTransparency = value / 100
-        end
+    for _, highlight in next, Storage:GetChildren() do
+        highlight.FillTransparency = value / 100
     end
 end)
 VisualsSection:NewSlider("Outline Transparency", "Adjust outline transparency", 100, 0, 0, function(value)
@@ -114,19 +152,19 @@ end)
 -- Combat Section
 local CombatSection = CombatTab:NewSection("Aimbot Settings")
 CombatSection:NewToggle("Enable Aimbot", "Toggles Aimbot on/off", function(state)
-    ToggleAimbot(state)
+    aimConfig.Enabled = state
 end)
 CombatSection:NewKeybind("Aimbot Key", "Set Aimbot trigger key", Enum.KeyCode.E, function(key)
-    getgenv().AimbotKey = key
+    aimConfig.AimKey = key
 end)
 CombatSection:NewDropdown("Target Part", "Select aim target", {"Head", "Torso"}, function(part)
-    getgenv().AimbotTargetPart = part == "Head" and "Head" or "HumanoidRootPart"
+    aimConfig.AimPart = part == "Head" and "Head" or "HumanoidRootPart"
 end)
-CombatSection:NewSlider("Smoothing", "Adjust Aimbot smoothing (0-1)", 1000, 0, 500, function(value)
-    getgenv().AimbotSmoothness = value / 1000
+CombatSection:NewSlider("Smoothing", "Adjust Aimbot smoothing (0-1)", 100, 0, 50, function(value)
+    aimConfig.Smoothing = value / 100
 end)
 CombatSection:NewSlider("Sensitivity", "Adjust Aimbot sensitivity", 5, 0, 2, function(value)
-    getgenv().AimbotSensitivity = value
+    aimConfig.Sensitivity = value
 end)
 
 -- UI Toggle with Right Shift
