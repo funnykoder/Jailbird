@@ -4,7 +4,6 @@ local Window = Library.CreateLib("Jailbird UI", "DarkTheme")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
 local lp = Players.LocalPlayer
 local Mouse = lp:GetMouse()
@@ -61,10 +60,11 @@ local target = nil
 local mouseSensitivity = UserInputService.MouseDeltaSensitivity
 local aimConfig = {
     Enabled = false,
-    AimKey = Enum.KeyCode.E,
+    AimKey = Enum.UserInputType.MouseButton2, -- Default to MB2
     AimPart = "HumanoidRootPart",
-    Smoothing = 0.5, -- 0 to 1
-    Sensitivity = 2 -- 0 to 5
+    FoVRadius = 100, -- Visual FoV circle radius
+    FoVColor = Color3.fromRGB(255, 255, 255), -- FoV circle color
+    LockFoV = 100 -- Enforced FoV for locking (70-120)
 }
 
 local function IsReady(tgt)
@@ -79,37 +79,61 @@ local function IsReady(tgt)
     if humanoid.Health <= 0 then 
         return false 
     end
-    return true, tgt, tgt[aimConfig.AimPart].Position
+    local partPos = tgt[aimConfig.AimPart].Position
+    local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(partPos)
+    if onScreen then
+        local mag = (Vector2.new(Mouse.X, Mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+        if mag > aimConfig.LockFoV then -- Enforce LockFoV
+            return false 
+        end
+    else
+        return false
+    end
+    return true, tgt, partPos
 end
 
+-- FoV Circle Setup
+local Drawing = getfenv().Drawing or loadstring(game:HttpGet("https://raw.githubusercontent.com/Roblox/Core-Scripts/master/CoreScriptsRoot/Libraries/Drawing.lua"))()
+local fovCircle = Drawing.new("Circle")
+fovCircle.Visible = false
+fovCircle.NumSides = 100
+fovCircle.Radius = aimConfig.FoVRadius
+fovCircle.Thickness = 2
+fovCircle.Transparency = 0.8
+fovCircle.Filled = false
+fovCircle.Color = aimConfig.FoVColor
+
 RunService.Heartbeat:Connect(function()
+    -- Update FoV Circle
+    local mousePos = UserInputService:GetMouseLocation()
+    fovCircle.Position = Vector2.new(mousePos.X, mousePos.Y)
+    fovCircle.Radius = aimConfig.FoVRadius
+    fovCircle.Color = aimConfig.FoVColor
+    fovCircle.Visible = aimConfig.Enabled
+
     if aimConfig.Enabled and aiming then
         local closest = math.huge
         target = nil
         for _, plr in next, Players:GetPlayers() do
             local isReady, char, partPos = IsReady(plr.Character)
             if isReady then
-                local screenPos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(partPos)
-                if onScreen then
-                    local mag = (Vector2.new(Mouse.X, Mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
-                    if mag < closest then
-                        target = char
-                        closest = mag
-                        print("Target found:", plr.Name, "Distance:", mag)
-                    end
+                local screenPos = workspace.CurrentCamera:WorldToViewportPoint(partPos)
+                local mag = (Vector2.new(Mouse.X, Mouse.Y) - Vector2.new(screenPos.X, screenPos.Y)).Magnitude
+                if mag < closest then
+                    target = char
+                    closest = mag
+                    print("Target found:", plr.Name, "Distance:", mag)
                 end
             end
         end
         if target and IsReady(target) then
             local _, _, partPos = IsReady(target)
             UserInputService.MouseDeltaSensitivity = 0
-            local tweenInfo = TweenInfo.new(aimConfig.Smoothing, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
-            local tween = TweenService:Create(workspace.CurrentCamera, tweenInfo, { CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, partPos) })
-            tween:Play()
-            print("Aiming at:", target.Name)
+            workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, partPos) -- Dead lock on
+            print("Locked on:", target.Name)
         else
             UserInputService.MouseDeltaSensitivity = mouseSensitivity
-            print("No valid target")
+            print("No valid target in LockFoV")
         end
     else
         aiming = false
@@ -119,13 +143,13 @@ RunService.Heartbeat:Connect(function()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == aimConfig.AimKey then
+    if not gameProcessed and (input.KeyCode == aimConfig.AimKey or input.UserInputType == aimConfig.AimKey) then
         aiming = true
-        print("Aimbot activated with key:", aimConfig.AimKey)
+        print("Aimbot activated with:", aimConfig.AimKey)
     end
 end)
 UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == aimConfig.AimKey then
+    if not gameProcessed and (input.KeyCode == aimConfig.AimKey or input.UserInputType == aimConfig.AimKey) then
         aiming = false
         print("Aimbot deactivated")
     end
@@ -167,7 +191,7 @@ CombatSection:NewToggle("Enable Aimbot", "Toggles Aimbot on/off", function(state
     aimConfig.Enabled = state
     print("Aimbot Enabled:", state)
 end)
-CombatSection:NewKeybind("Aimbot Key", "Set Aimbot trigger key", Enum.KeyCode.E, function(key)
+CombatSection:NewKeybind("Aimbot Key", "Set Aimbot trigger key (MB2 supported)", Enum.UserInputType.MouseButton2, function(key)
     aimConfig.AimKey = key
     print("Aimbot Key set to:", key)
 end)
@@ -175,21 +199,23 @@ CombatSection:NewDropdown("Target Part", "Select aim target", {"Head", "Torso"},
     aimConfig.AimPart = part == "Head" and "Head" or "HumanoidRootPart"
     print("Target Part set to:", aimConfig.AimPart)
 end)
-CombatSection:NewSlider("Smoothing", "Adjust Aimbot smoothing (0-1)", 100, 0, 50, function(value)
-    aimConfig.Smoothing = value / 100
-    print("Smoothing set to:", aimConfig.Smoothing)
+CombatSection:NewSlider("FoV Radius", "Adjust visual FoV circle radius", 1000, 10, 100, function(value)
+    aimConfig.FoVRadius = value
+    print("Visual FoV Radius set to:", aimConfig.FoVRadius)
 end)
-CombatSection:NewSlider("Sensitivity", "Adjust Aimbot sensitivity", 5, 0, 2, function(value)
-    aimConfig.Sensitivity = value
-    print("Sensitivity set to:", aimConfig.Sensitivity)
+CombatSection:NewColorPicker("FoV Color", "Change FoV circle color", Color3.fromRGB(255, 255, 255), function(color)
+    aimConfig.FoVColor = color
+    print("FoV Color set to:", color)
+end)
+CombatSection:NewSlider("Lock FoV", "Force Aimbot FoV range (70-120)", 120, 70, 100, function(value)
+    aimConfig.LockFoV = value
+    print("Lock FoV set to:", aimConfig.LockFoV)
 end)
 
--- Right Shift Toggle Fix
-local uiVisible = true
+-- Right Shift Toggle
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
-        uiVisible = not uiVisible
         Library:ToggleUI()
-        print("UI Toggled:", uiVisible)
+        print("UI Toggled")
     end
 end)
