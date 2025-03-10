@@ -68,16 +68,22 @@ local aimConfig = {
 }
 
 local function IsReady(tgt)
-    if not tgt or not tgt:FindFirstChildWhichIsA("Humanoid") or not tgt:FindFirstChild(aimConfig.AimPart) or not lp.Character or not lp.Character:FindFirstChildWhichIsA("Humanoid") then return false end
+    if not tgt or not tgt:FindFirstChildOfClass("Humanoid") or not tgt:FindFirstChild(aimConfig.AimPart) or not lp.Character or not lp.Character:FindFirstChildOfClass("Humanoid") then 
+        return false 
+    end
     local plr = Players:GetPlayerFromCharacter(tgt)
-    if not plr or plr == lp or (plr.Team and lp.Team and plr.Team == lp.Team) then return false end
-    local humanoid = tgt:FindFirstChildWhichIsA("Humanoid")
-    if humanoid.Health == 0 then return false end
-    return true, tgt, tgt:FindFirstChild(aimConfig.AimPart).Position
+    if not plr or plr == lp or (plr.Team and lp.Team and plr.Team == lp.Team) then 
+        return false 
+    end
+    local humanoid = tgt:FindFirstChildOfClass("Humanoid")
+    if humanoid.Health <= 0 then 
+        return false 
+    end
+    return true, tgt, tgt[aimConfig.AimPart].Position
 end
 
 RunService.Heartbeat:Connect(function()
-    if aiming and aimConfig.Enabled then
+    if aimConfig.Enabled and aiming then
         local closest = math.huge
         target = nil
         for _, plr in next, Players:GetPlayers() do
@@ -89,6 +95,7 @@ RunService.Heartbeat:Connect(function()
                     if mag < closest then
                         target = char
                         closest = mag
+                        print("Target found:", plr.Name, "Distance:", mag)
                     end
                 end
             end
@@ -96,10 +103,13 @@ RunService.Heartbeat:Connect(function()
         if target and IsReady(target) then
             local _, _, partPos = IsReady(target)
             UserInputService.MouseDeltaSensitivity = 0
-            local tween = TweenService:Create(workspace.CurrentCamera, TweenInfo.new(aimConfig.Smoothing, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, partPos) })
+            local tweenInfo = TweenInfo.new(aimConfig.Smoothing, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            local tween = TweenService:Create(workspace.CurrentCamera, tweenInfo, { CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, partPos) })
             tween:Play()
+            print("Aiming at:", target.Name)
         else
             UserInputService.MouseDeltaSensitivity = mouseSensitivity
+            print("No valid target")
         end
     else
         aiming = false
@@ -108,14 +118,16 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-UserInputService.InputBegan:Connect(function(input)
-    if not UserInputService:GetFocusedTextBox() and input.KeyCode == aimConfig.AimKey then
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == aimConfig.AimKey then
         aiming = true
+        print("Aimbot activated with key:", aimConfig.AimKey)
     end
 end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == aimConfig.AimKey then
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == aimConfig.AimKey then
         aiming = false
+        print("Aimbot deactivated")
     end
 end)
 
@@ -153,21 +165,31 @@ end)
 local CombatSection = CombatTab:NewSection("Aimbot Settings")
 CombatSection:NewToggle("Enable Aimbot", "Toggles Aimbot on/off", function(state)
     aimConfig.Enabled = state
+    print("Aimbot Enabled:", state)
 end)
 CombatSection:NewKeybind("Aimbot Key", "Set Aimbot trigger key", Enum.KeyCode.E, function(key)
     aimConfig.AimKey = key
+    print("Aimbot Key set to:", key)
 end)
 CombatSection:NewDropdown("Target Part", "Select aim target", {"Head", "Torso"}, function(part)
     aimConfig.AimPart = part == "Head" and "Head" or "HumanoidRootPart"
+    print("Target Part set to:", aimConfig.AimPart)
 end)
 CombatSection:NewSlider("Smoothing", "Adjust Aimbot smoothing (0-1)", 100, 0, 50, function(value)
     aimConfig.Smoothing = value / 100
+    print("Smoothing set to:", aimConfig.Smoothing)
 end)
 CombatSection:NewSlider("Sensitivity", "Adjust Aimbot sensitivity", 5, 0, 2, function(value)
     aimConfig.Sensitivity = value
+    print("Sensitivity set to:", aimConfig.Sensitivity)
 end)
 
--- UI Toggle with Right Shift
-Window:NewKeybind("Toggle UI", "Show/hide UI with Right Shift", Enum.KeyCode.RightShift, function()
-    Library:ToggleUI()
+-- Right Shift Toggle Fix
+local uiVisible = true
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        uiVisible = not uiVisible
+        Library:ToggleUI()
+        print("UI Toggled:", uiVisible)
+    end
 end)
